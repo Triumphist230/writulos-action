@@ -4,7 +4,7 @@
 
 name: 'Writulos Auto-Docs'
 author: 'Triumphist230'
-description: 'Auto-generate markdown docs for changed code files using Claude AI. Commits on push, comments on PRs.'
+description: 'Auto-generate markdown docs for changed code files. Commits on push, comments on PRs.'
 
 branding:
   icon: 'file-text'
