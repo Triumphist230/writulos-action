@@ -1,6 +1,6 @@
 # Writulos Auto-Docs — GitHub Action
 
-Automatically generate **markdown documentation** for every changed code file in your repository, powered by [Writulos](https://writulos.com) and Claude AI.
+Automatically generate **markdown documentation** for every changed code file in your repository, powered by [Writulos](https://writulos.com).
 
 - **On push to main/master** → docs are committed directly to your `docs/` folder
 - **On pull requests** → a bot comment lists every newly documented file
@@ -57,7 +57,7 @@ That's it. No API key needed — Writulos is a hosted service.
 
 1. On every push or PR, the action runs `git diff` to find changed source files.
 2. Each changed file is sent to the Writulos API (`/api/action-generate`).
-3. Claude generates structured markdown documentation.
+3. Writulos generates structured markdown documentation.
 4. **Push events** → docs are committed to `docs/` by the Writulos bot.
 5. **PR events** → a comment is posted listing all newly documented files.
 
