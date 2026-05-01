@@ -1,80 +1,31 @@
-# Writulos Auto-Docs — GitHub Action
-# Marketplace metadata lives in this file at the ROOT of the repository.
-# https://docs.github.com/en/actions/creating-actions/metadata-syntax-for-github-actions
-
 name: 'Writulos Auto-Docs'
-author: 'Triumphist230'
-description: 'Auto-generate markdown docs for changed code files. Commits on push, comments on PRs.'
+description: 'Auto-generate markdown documentation for every changed code file, powered by Writulos.'
+author: 'Writulos'
 
 branding:
-  icon: 'file-text'
+  icon: 'book-open'
   color: 'red'
 
 inputs:
-  writulos_secret:
-    description: 'Optional shared secret to authenticate with your Writulos endpoint (WRITULOS_ACTION_SECRET). Leave empty if your endpoint is open.'
-    required: false
-    default: ''
-
   github_token:
-    description: 'GitHub token used to commit generated docs and post PR comments. Use secrets.GITHUB_TOKEN.'
+    description: 'GitHub token for committing docs and posting PR comments. Pass secrets.GITHUB_TOKEN.'
     required: true
-
+  writulos_api_key:
+    description: 'Your Writulos API key. Get it from writulos.com/dashboard/agent. Pass secrets.WRITULOS_API_KEY.'
+    required: true
   file_extensions:
-    description: 'Comma-separated list of file extensions to document (without dots).'
+    description: 'Comma-separated list of file extensions to document (no dots).'
     required: false
     default: 'js,ts,jsx,tsx,py,java,go,rb'
-
   output_dir:
-    description: 'Directory to write generated markdown docs into.'
+    description: 'Directory to write generated .md files into.'
     required: false
     default: 'docs'
-
   api_url:
-    description: 'Writulos API endpoint. Override only if you are self-hosting.'
+    description: 'Writulos API endpoint. Override only if self-hosting.'
     required: false
     default: 'https://writulos.com/api/action-generate'
 
 runs:
-  using: 'composite'
-  steps:
-    - name: Set up Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: '20'
-
-    - name: Get changed files
-      id: changed
-      shell: bash
-      run: |
-        EXTS="${{ inputs.file_extensions }}"
-        # Build git diff pattern from comma-separated extensions
-        PATTERNS=$(echo "$EXTS" | tr ',' '\n' | sed 's/^/*./' | tr '\n' ' ')
-        FILES=$(git diff --name-only HEAD~1 HEAD -- $PATTERNS | tr '\n' ',')
-        echo "files=$FILES" >> $GITHUB_OUTPUT
-        echo "Writulos: changed files → $FILES"
-
-    - name: Generate documentation
-      if: steps.changed.outputs.files != ''
-      shell: bash
-      working-directory: ${{ github.action_path }}/action
-      env:
-        CHANGED_FILES: ${{ steps.changed.outputs.files }}
-        GITHUB_TOKEN: ${{ inputs.github_token }}
-        WRITULOS_ACTION_SECRET: ${{ inputs.writulos_secret }}
-        WRITULOS_API_URL: ${{ inputs.api_url }}
-        WRITULOS_OUTPUT_DIR: ${{ inputs.output_dir }}
-        PR_NUMBER: ${{ github.event.pull_request.number }}
-        EVENT_NAME: ${{ github.event_name }}
-        REPO_NAME: ${{ github.repository }}
-      run: node run.js
-
-    - name: Commit generated docs
-      if: github.event_name == 'push' && steps.changed.outputs.files != ''
-      shell: bash
-      run: |
-        git config --local user.email "action@writulos.com"
-        git config --local user.name "Writulos Bot"
-        git add "${{ inputs.output_dir }}/"
-        git diff --staged --quiet || git commit -m "docs: auto-generate documentation [writulos]"
-        git push
+  using: 'node20'
+  main: 'action/run.js'
