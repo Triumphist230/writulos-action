@@ -1,15 +1,27 @@
-const core = require('@actions/core');
-const github = require('@actions/github');
 const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
+const https = require('https');
+
+// Replaces @actions/core
+function getInput(name) {
+  return process.env[`INPUT_${name.toUpperCase().replace(/ /g, '_')}`] || '';
+}
+function info(msg) { process.stdout.write(`${msg}\n`); }
+function warning(msg) { process.stdout.write(`::warning::${msg}\n`); }
+function setFailed(msg) { process.stdout.write(`::error::${msg}\n`); process.exit(1); }
+
+// Replaces @actions/github context
+const eventName = process.env.GITHUB_EVENT_NAME || '';
+const repo = { owner: (process.env.GITHUB_REPOSITORY || '').split('/')[0], repo: (process.env.GITHUB_REPOSITORY || '').split('/')[1] };
+const githubToken = getInput('github_token');
 
 function getAllFiles(dir, exts, root = dir) {
   let results = [];
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const fullPath = path.join(dir, entry.name);
     if (entry.isDirectory()) {
-      if (!entry.name.startsWith('.') && entry.name !== 'node_modules') {
+      if (!entry.name.startsWith('.') && entry.name !== 'node_modules' && entry.name !== 'docs') {
         results = results.concat(getAllFiles(fullPath, exts, root));
       }
     } else {
@@ -20,149 +32,111 @@ function getAllFiles(dir, exts, root = dir) {
   return results;
 }
 
+function postComment(issueNumber, body) {
+  return new Promise((resolve, reject) => {
+    const data = JSON.stringify({ body });
+    const options = {
+      hostname: 'api.github.com',
+      path: `/repos/${repo.owner}/${repo.repo}/issues/${issueNumber}/comments`,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `token ${githubToken}`,
+        'User-Agent': 'writulos-action',
+        'Content-Length': Buffer.byteLength(data),
+      },
+    };
+    const req = https.request(options, (res) => {
+      res.on('data', () => {});
+      res.on('end', resolve);
+    });
+    req.on('error', reject);
+    req.write(data);
+    req.end();
+  });
+}
+
 async function run() {
-  const githubToken = core.getInput('github_token', { required: true });
-  const writulosApiKey = core.getInput('writulos_api_key', { required: true });
-  const fileExtensions = core.getInput('file_extensions') || 'js,ts,jsx,tsx,py,java,go,rb';
-  const outputDir = core.getInput('output_dir') || 'docs';
-  const apiUrl = core.getInput('api_url') || 'https://writulos.com/api/action-generate';
+  const writulosApiKey = getInput('writulos_api_key');
+  const fileExtensions = getInput('file_extensions') || 'js,ts,jsx,tsx,py,java,go,rb';
+  const outputDir = getInput('output_dir') || 'docs';
+  const apiUrl = getInput('api_url') || 'https://writulos.com/api/action-generate';
 
-  const octokit = github.getOctokit(githubToken);
-  const context = github.context;
+  if (!writulosApiKey) { setFailed('writulos_api_key is required.'); return; }
+  if (!githubToken) { setFailed('github_token is required.'); return; }
+
   const exts = new Set(fileExtensions.split(',').map(e => e.trim().replace(/^\./, '')));
-
-  const isFullScan = context.eventName === 'workflow_dispatch';
+  const isFullScan = eventName === 'workflow_dispatch';
   let changedFiles = [];
 
   if (isFullScan) {
-    core.info('Full-repo scan triggered via workflow_dispatch.');
+    info('Full-repo scan triggered via workflow_dispatch.');
     changedFiles = getAllFiles('.', exts);
-    core.info(`Found ${changedFiles.length} file(s) to document.`);
+    info(`Found ${changedFiles.length} file(s) to document.`);
   } else {
     try {
       const diff = execSync('git diff HEAD~1 HEAD --name-only').toString().trim();
-      changedFiles = diff.split('\n').filter(f => {
-        const ext = f.split('.').pop();
-        return ext && exts.has(ext);
-      });
+      changedFiles = diff.split('\n').filter(f => { const ext = f.split('.').pop(); return ext && exts.has(ext); });
     } catch (e) {
-      core.warning('Could not determine changed files via git diff. Skipping.');
+      warning('Could not determine changed files via git diff. Skipping.');
       return;
     }
   }
 
-  if (changedFiles.length === 0) {
-    core.info('No supported files found. Nothing to document.');
-    return;
-  }
-
-  core.info(`Files to document: ${changedFiles.join(', ')}`);
+  if (changedFiles.length === 0) { info('No supported files found. Nothing to document.'); return; }
+  info(`Files to document: ${changedFiles.join(', ')}`);
 
   const documented = [];
   const failed = [];
 
   for (const filePath of changedFiles) {
-    if (!fs.existsSync(filePath)) {
-      core.info(`Skipping deleted file: ${filePath}`);
-      continue;
-    }
-
+    if (!fs.existsSync(filePath)) { info(`Skipping deleted file: ${filePath}`); continue; }
     const code = fs.readFileSync(filePath, 'utf8');
-
-    if (!code.trim()) {
-      core.info(`Skipping empty file: ${filePath}`);
-      continue;
-    }
-
-    if (code.length > 100_000) {
-      core.warning(`Skipping ${filePath} — file exceeds 100KB limit.`);
-      continue;
-    }
+    if (!code.trim()) { info(`Skipping empty file: ${filePath}`); continue; }
+    if (code.length > 100_000) { warning(`Skipping ${filePath} — file exceeds 100KB limit.`); continue; }
 
     try {
       const response = await fetch(apiUrl, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': writulosApiKey,
-        },
-        body: JSON.stringify({
-          code,
-          filename: path.basename(filePath),
-          context: `File path: ${filePath}`,
-        }),
+        headers: { 'Content-Type': 'application/json', 'x-api-key': writulosApiKey },
+        body: JSON.stringify({ code, filename: path.basename(filePath), context: `File path: ${filePath}` }),
       });
 
-      if (response.status === 401) {
-        core.setFailed('Invalid Writulos API key. Check that WRITULOS_API_KEY is set correctly in your repo secrets.');
-        return;
-      }
-
-      if (!response.ok) {
-        const body = await response.text();
-        core.warning(`Failed to generate docs for ${filePath}: ${response.status} ${body}`);
-        failed.push(filePath);
-        continue;
-      }
+      if (response.status === 401) { setFailed('Invalid Writulos API key. Check WRITULOS_API_KEY in your repo secrets.'); return; }
+      if (!response.ok) { const b = await response.text(); warning(`Failed for ${filePath}: ${response.status} ${b}`); failed.push(filePath); continue; }
 
       const data = await response.json();
-      const documentation = data.documentation;
-
-      if (!documentation) {
-        core.warning(`Empty documentation returned for ${filePath}`);
-        failed.push(filePath);
-        continue;
-      }
+      if (!data.documentation) { warning(`Empty docs returned for ${filePath}`); failed.push(filePath); continue; }
 
       const docPath = path.join(outputDir, filePath.replace(/\.[^.]+$/, '.md'));
       fs.mkdirSync(path.dirname(docPath), { recursive: true });
-      fs.writeFileSync(docPath, documentation, 'utf8');
-      core.info(`Documented: ${filePath} → ${docPath}`);
+      fs.writeFileSync(docPath, data.documentation, 'utf8');
+      info(`Documented: ${filePath} → ${docPath}`);
       documented.push({ src: filePath, doc: docPath });
-
     } catch (err) {
-      core.warning(`Error documenting ${filePath}: ${err.message}`);
+      warning(`Error documenting ${filePath}: ${err.message}`);
       failed.push(filePath);
     }
   }
 
-  if (documented.length === 0) {
-    core.info('No docs generated.');
-    return;
-  }
+  if (documented.length === 0) { info('No docs generated.'); return; }
 
-  if (context.eventName === 'push' || isFullScan) {
+  if (eventName === 'push' || isFullScan) {
     execSync('git config user.name "Writulos Bot"');
     execSync('git config user.email "action@writulos.com"');
     execSync(`git add ${outputDir}`);
     try {
-      const msg = isFullScan
-        ? `docs: full-repo scan — document ${documented.length} file(s) [writulos]`
-        : 'docs: auto-generate documentation [writulos]';
+      const msg = isFullScan ? `docs: full-repo scan — document ${documented.length} file(s) [writulos]` : 'docs: auto-generate documentation [writulos]';
       execSync(`git commit -m "${msg}"`);
       execSync('git push');
-      core.info(`Committed docs for ${documented.length} file(s).`);
-    } catch {
-      core.info('Nothing new to commit.');
-    }
-  } else if (context.eventName === 'pull_request') {
+      info(`Committed docs for ${documented.length} file(s).`);
+    } catch { info('Nothing new to commit.'); }
+  } else if (eventName === 'pull_request') {
+    const prNumber = JSON.parse(fs.readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8')).pull_request.number;
     const lines = documented.map(({ src, doc }) => `- \`${src}\` → \`${doc}\``);
-    const body = [
-      '### 📄 Writulos Auto-Docs',
-      '',
-      `Generated documentation for **${documented.length}** file(s):`,
-      '',
-      ...lines,
-      '',
-      failed.length > 0 ? `> ⚠️ ${failed.length} file(s) failed: ${failed.join(', ')}` : '',
-    ].filter(l => l !== undefined).join('\n');
-
-    await octokit.rest.issues.createComment({
-      ...context.repo,
-      issue_number: context.payload.pull_request.number,
-      body,
-    });
+    const body = ['### 📄 Writulos Auto-Docs', '', `Generated documentation for **${documented.length}** file(s):`, '', ...lines, '', failed.length > 0 ? `> ⚠️ ${failed.length} file(s) failed: ${failed.join(', ')}` : ''].join('\n');
+    await postComment(prNumber, body);
   }
 }
 
-run().catch(err => core.setFailed(err.message));
+run().catch(err => setFailed(err.message));
