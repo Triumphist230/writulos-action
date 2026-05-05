@@ -4,6 +4,22 @@ const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
 
+function getAllFiles(dir, exts, root = dir) {
+  let results = [];
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const fullPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      if (!entry.name.startsWith('.') && entry.name !== 'node_modules') {
+        results = results.concat(getAllFiles(fullPath, exts, root));
+      }
+    } else {
+      const ext = entry.name.split('.').pop();
+      if (ext && exts.has(ext)) results.push(path.relative(root, fullPath));
+    }
+  }
+  return results;
+}
+
 async function run() {
   const githubToken = core.getInput('github_token', { required: true });
   const writulosApiKey = core.getInput('writulos_api_key', { required: true });
@@ -15,21 +31,28 @@ async function run() {
   const context = github.context;
   const exts = new Set(fileExtensions.split(',').map(e => e.trim().replace(/^\./, '')));
 
-  // --- Find changed files ---
+  const isFullScan = context.eventName === 'workflow_dispatch';
   let changedFiles = [];
-  try {
-    const diff = execSync('git diff HEAD~1 HEAD --name-only').toString().trim();
-    changedFiles = diff.split('\n').filter(f => {
-      const ext = f.split('.').pop();
-      return ext && exts.has(ext);
-    });
-  } catch (e) {
-    core.warning('Could not determine changed files via git diff. Skipping.');
-    return;
+
+  if (isFullScan) {
+    core.info('Full-repo scan triggered via workflow_dispatch.');
+    changedFiles = getAllFiles('.', exts);
+    core.info(`Found ${changedFiles.length} file(s) to document.`);
+  } else {
+    try {
+      const diff = execSync('git diff HEAD~1 HEAD --name-only').toString().trim();
+      changedFiles = diff.split('\n').filter(f => {
+        const ext = f.split('.').pop();
+        return ext && exts.has(ext);
+      });
+    } catch (e) {
+      core.warning('Could not determine changed files via git diff. Skipping.');
+      return;
+    }
   }
 
   if (changedFiles.length === 0) {
-    core.info('No supported files changed. Nothing to document.');
+    core.info('No supported files found. Nothing to document.');
     return;
   }
 
@@ -91,7 +114,6 @@ async function run() {
         continue;
       }
 
-      // Write doc to output_dir, mirroring the source path
       const docPath = path.join(outputDir, filePath.replace(/\.[^.]+$/, '.md'));
       fs.mkdirSync(path.dirname(docPath), { recursive: true });
       fs.writeFileSync(docPath, documentation, 'utf8');
@@ -109,21 +131,21 @@ async function run() {
     return;
   }
 
-  // --- Push or comment depending on event ---
-  if (context.eventName === 'push') {
-    // Commit generated docs back to the repo
+  if (context.eventName === 'push' || isFullScan) {
     execSync('git config user.name "Writulos Bot"');
     execSync('git config user.email "action@writulos.com"');
     execSync(`git add ${outputDir}`);
     try {
-      execSync('git commit -m "docs: auto-generate documentation [writulos]"');
+      const msg = isFullScan
+        ? `docs: full-repo scan — document ${documented.length} file(s) [writulos]`
+        : 'docs: auto-generate documentation [writulos]';
+      execSync(`git commit -m "${msg}"`);
       execSync('git push');
       core.info(`Committed docs for ${documented.length} file(s).`);
     } catch {
       core.info('Nothing new to commit.');
     }
   } else if (context.eventName === 'pull_request') {
-    // Post a PR comment listing documented files
     const lines = documented.map(({ src, doc }) => `- \`${src}\` → \`${doc}\``);
     const body = [
       '### 📄 Writulos Auto-Docs',
