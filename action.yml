@@ -11,7 +11,7 @@ inputs:
     description: 'GitHub token for committing docs and posting PR comments. Pass secrets.GITHUB_TOKEN.'
     required: true
   writulos_api_key:
-    description: 'Your Writulos API key. Get it from writulos.com/dashboard/agent. Pass secrets.WRITULOS_API_KEY.'
+    description: 'Your Writulos API key. Get it from writulos.com/dashboard/api-keys. Pass secrets.WRITULOS_API_KEY.'
     required: true
   file_extensions:
     description: 'Comma-separated list of file extensions to document (no dots).'
