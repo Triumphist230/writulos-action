@@ -102,7 +102,7 @@ async function run() {
         body: JSON.stringify({ code, filename: path.basename(filePath), context: `File path: ${filePath}` }),
       });
 
-      if (response.status === 401) { setFailed('Invalid Writulos API key. Check WRITULOS_API_KEY in your repo secrets.'); return; }
+      if (response.status === 401) { const b = await response.text(); setFailed(`401: ${b}`); return; }
       if (!response.ok) { const b = await response.text(); warning(`Failed for ${filePath}: ${response.status} ${b}`); failed.push(filePath); continue; }
 
       const data = await response.json();
