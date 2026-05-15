@@ -1,19 +1,19 @@
-'use strict';
+﻿'use strict';
 const path = require('path');
 const fs   = require('fs');
 
-const API_URL     = process.env.WRITULOS_API_URL     || 'https://writulos.com/api/action-generate';
-const OUTPUT_DIR  = process.env.WRITULOS_OUTPUT_DIR  || 'docs';
-const API_KEY     = process.env.WRITULOS_API_KEY     || '';
+const API_URL     = process.env.INPUT_API_URL     || 'https://writulos.com/api/action-generate';
+const OUTPUT_DIR  = process.env.INPUT_OUTPUT_DIR  || 'docs';
+const API_KEY     = process.env.INPUT_WRITULOS_API_KEY     || '';
 const GH_TOKEN    = process.env.GITHUB_TOKEN         || '';
-const MODE        = (process.env.WRITULOS_MODE       || 'commit').toLowerCase();
+const MODE        = (process.env.INPUT_MODE       || 'commit').toLowerCase();
 const PR_NUMBER   = process.env.PR_NUMBER;
 const EVENT_NAME  = process.env.EVENT_NAME;
 const REPO_NAME   = process.env.REPO_NAME            || '';
 const REPO_BRANCH = process.env.REPO_BRANCH          || 'main';
 
 // WRITULOS_WORKSPACE = github.workspace = user's repo root on the runner
-const WORKSPACE      = process.env.WRITULOS_WORKSPACE || process.cwd();
+const WORKSPACE      = process.env.GITHUB_WORKSPACE || process.cwd();
 const OUTPUT_DIR_ABS = path.resolve(WORKSPACE, OUTPUT_DIR);
 const LOG_PATH       = path.join(OUTPUT_DIR_ABS, 'writulos.log');
 const LOG_REPO_PATH  = `${OUTPUT_DIR}/writulos.log`;
@@ -52,7 +52,7 @@ function getAllFiles(dir, root) {
     } else {
       const ext = entry.name.split('.').pop();
       const exts = new Set(
-        (process.env.WRITULOS_FILE_EXTENSIONS || 'js,ts,jsx,tsx,py,java,go,rb')
+        (process.env.INPUT_FILE_EXTENSIONS || 'js,ts,jsx,tsx,py,java,go,rb')
           .split(',').map(e => e.trim().replace(/^\./, ''))
       );
       if (ext && exts.has(ext)) results.push(path.relative(root, fullPath));
@@ -369,3 +369,4 @@ main().catch((err) => {
   console.error('Writulos action failed:', err.message);
   process.exit(1);
 });
+
