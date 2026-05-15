@@ -3,27 +3,24 @@ const path = require('path');
 const fs   = require('fs');
 
 // All inputs declared in action.yml are mapped by GitHub to INPUT_<UPPERCASE_NAME>
-const API_URL     = process.env.INPUT_API_URL              || 'https://writulos.com/api/action-generate';
-const OUTPUT_DIR  = process.env.INPUT_OUTPUT_DIR           || 'docs';
-const API_KEY     = process.env.INPUT_WRITULOS_API_KEY     || '';
-const GH_TOKEN    = process.env.INPUT_GITHUB_TOKEN         || '';
-const FILE_EXTS   = (process.env.INPUT_FILE_EXTENSIONS     || 'js,ts,jsx,tsx,py,java,go,rb')
-                      .split(',').map(e => e.trim().replace(/^\./, ''));
-const MODE        = (process.env.INPUT_MODE                || 'commit').toLowerCase();
+const API_URL    = process.env.INPUT_API_URL          || 'https://writulos.com/api/action-generate';
+const OUTPUT_DIR = process.env.INPUT_OUTPUT_DIR       || 'docs';
+const API_KEY    = process.env.INPUT_WRITULOS_API_KEY || '';
+const GH_TOKEN   = process.env.INPUT_GITHUB_TOKEN     || '';
+const FILE_EXTS  = (process.env.INPUT_FILE_EXTENSIONS || 'js,ts,jsx,tsx,py,java,go,rb')
+                     .split(',').map(e => e.trim().replace(/^\./, ''));
+const MODE       = (process.env.INPUT_MODE            || 'commit').toLowerCase();
 
 // Standard GitHub Actions runner env vars (set automatically by GitHub, not via inputs)
-const REPO_NAME   = process.env.GITHUB_REPOSITORY         || '';
-const REPO_BRANCH = (process.env.GITHUB_REF               || '').replace('refs/heads/', '') || 'main';
-const EVENT_NAME  = process.env.GITHUB_EVENT_NAME         || '';
+const REPO_NAME   = process.env.GITHUB_REPOSITORY || '';
+const REPO_BRANCH = (process.env.GITHUB_REF || '').replace('refs/heads/', '') || 'main';
+const EVENT_NAME  = process.env.GITHUB_EVENT_NAME || '';
 const PR_NUMBER   = process.env.GITHUB_REF
-                      ? (process.env.GITHUB_REF.match(/refs\/pull\/(\d+)\//) || [])[1]
-                      : null;
-const WORKSPACE   = process.env.GITHUB_WORKSPACE          || process.cwd();
+                     ? (process.env.GITHUB_REF.match(/refs\/pull\/(\d+)\//) || [])[1]
+                     : null;
+const WORKSPACE  = process.env.GITHUB_WORKSPACE || process.cwd();
 
-const OUTPUT_DIR_ABS = path.resolve(WORKSPACE, OUTPUT_DIR);
-const LOG_PATH       = path.join(OUTPUT_DIR_ABS, 'writulos.log');
-const LOG_REPO_PATH  = `${OUTPUT_DIR}/writulos.log`;
-const EXTS           = new Set(FILE_EXTS);
+const EXTS = new Set(FILE_EXTS);
 
 if (!API_KEY) {
   console.error('Writulos: writulos_api_key is not set. Add WRITULOS_API_KEY as a GitHub secret.');
@@ -62,38 +59,6 @@ function getAllFiles(dir, root) {
     }
   }
   return results;
-}
-
-function appendLog({ succeeded, total, remaining, limitReached, isPro, daysLeft, monthlyLimit }) {
-  try {
-    if (!fs.existsSync(OUTPUT_DIR_ABS)) fs.mkdirSync(OUTPUT_DIR_ABS, { recursive: true });
-    const isNew  = !fs.existsSync(LOG_PATH);
-    const ts     = new Date().toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
-    const status = limitReached ? 'LIMIT REACHED' : 'OK';
-    const lines  = [];
-    if (isNew) {
-      lines.push(
-        '# Writulos Log',
-        '# This file lives in your docs/ folder alongside generated documentation.',
-        '# Every run appends a new entry -- it is never overwritten.',
-        '# Delete it anytime -- it will be recreated on the next run.',
-        '',
-      );
-    }
-    lines.push(`[${ts}] GitHub Actions -- ${status}`);
-    lines.push(`  Files: ${succeeded}/${total} documented`);
-    if (!limitReached && remaining != null) lines.push(`  Remaining: ${remaining} generations this month`);
-    if (limitReached) {
-      lines.push(isPro
-        ? `  NOTIFICATION: Pro limit reached (${monthlyLimit}/month). Resets in ${daysLeft} day(s) - https://writulos.com/#pricing`
-        : `  NOTIFICATION: Free limit reached (${monthlyLimit}/month). Resets in ${daysLeft} day(s) - https://writulos.com/upgrade`);
-    }
-    lines.push('');
-    fs.appendFileSync(LOG_PATH, lines.join('\n'), 'utf8');
-    console.log(`[writulos] log -> ${LOG_PATH}`);
-  } catch (err) {
-    console.error('[writulos] Could not write log:', err.message);
-  }
 }
 
 async function commitFileToBranch(docPath, content, branch) {
@@ -150,12 +115,12 @@ async function generateDoc(filePath) {
     const data = await response.json();
     const limitMatch = (data.error || '').match(/\d+/);
     return {
-      limitReached:  true,
-      daysLeft:      data.daysLeft || 0,
-      isPro:         !data.showProBanner,
-      remaining:     0,
-      filename:      filePath,
-      monthlyLimit:  limitMatch ? limitMatch[0] : '?',
+      limitReached: true,
+      daysLeft:     data.daysLeft || 0,
+      isPro:        !data.showProBanner,
+      remaining:    0,
+      filename:     filePath,
+      monthlyLimit: limitMatch ? limitMatch[0] : '?',
     };
   }
 
@@ -230,7 +195,7 @@ async function openPullRequest(docsBranch, docPaths) {
 async function postPRComment(summaryLines, prUrl) {
   if (!GH_TOKEN || !PR_NUMBER || EVENT_NAME !== 'pull_request') return;
   const fileList = summaryLines.map(l => `- \`${l}\``).join('\n');
-  const prLine   = prUrl ? `\n\n[View the docs PR ->(${prUrl})` : '';
+  const prLine   = prUrl ? `\n\n[View the docs PR](${prUrl})` : '';
   const body = [
     '## Writulos -- Documentation Generated', '',
     'Documentation was auto-generated for the following changed files:', '',
@@ -267,9 +232,6 @@ async function main() {
 
   if (changedFiles.length === 0) {
     console.log('Writulos: no supported files found. Skipping.');
-    appendLog({ succeeded: 0, total: 0, remaining: null, limitReached: false, isPro: false, daysLeft: 0 });
-    const logContent = fs.existsSync(LOG_PATH) ? fs.readFileSync(LOG_PATH, 'utf8') : '';
-    if (logContent) await commitFileToBranch(LOG_REPO_PATH, logContent, REPO_BRANCH).catch(() => {});
     return;
   }
 
@@ -279,7 +241,6 @@ async function main() {
   let lastRemaining     = null;
   let limitReached      = false;
   let limitDaysLeft     = 0;
-  let limitIsPro        = false;
   let limitFilename     = null;
   let limitMonthlyLimit = null;
 
@@ -291,7 +252,6 @@ async function main() {
     if (result.limitReached) {
       limitReached      = true;
       limitDaysLeft     = result.daysLeft;
-      limitIsPro        = result.isPro;
       limitFilename     = result.filename;
       limitMonthlyLimit = result.monthlyLimit;
       console.warn(`  [limit] Monthly generation limit reached.`);
@@ -307,19 +267,7 @@ async function main() {
     generated.push({ docPath, content: result.documentation, srcPath: filePath });
   }
 
-  appendLog({
-    succeeded:    generated.length,
-    total:        changedFiles.length,
-    remaining:    lastRemaining,
-    limitReached,
-    isPro:        limitIsPro,
-    daysLeft:     limitDaysLeft,
-    monthlyLimit: limitMonthlyLimit,
-  });
-  const logContent = fs.existsSync(LOG_PATH) ? fs.readFileSync(LOG_PATH, 'utf8') : '';
-
   if (limitReached) {
-    if (logContent) await commitFileToBranch(LOG_REPO_PATH, logContent, REPO_BRANCH);
     const msg = `Failed for ${limitFilename}. Monthly limit of ${limitMonthlyLimit} generations reached. Resets on the 1st of next month (in ${limitDaysLeft} day${limitDaysLeft === 1 ? '' : 's'}).`;
     console.error(`\n${msg}`);
     process.exit(1);
@@ -336,8 +284,8 @@ async function main() {
       const ok = await commitFileToBranch(docPath, content, REPO_BRANCH);
       if (ok) committed.push(docPath);
     }
-    await commitFileToBranch(LOG_REPO_PATH, logContent, REPO_BRANCH);
-    console.log(`\nWritulos: done. Committed ${committed.length} doc(s) + writulos.log`);
+    if (lastRemaining !== null) console.log(`  [usage] ${lastRemaining} generation(s) remaining this month.`);
+    console.log(`\nWritulos: done. Committed ${committed.length} doc(s).`);
     await postPRComment(committed);
     return;
   }
@@ -353,7 +301,6 @@ async function main() {
       const ok = await commitFileToBranch(docPath, content, docsBranch);
       if (ok) committed.push(docPath);
     }
-    await commitFileToBranch(LOG_REPO_PATH, logContent, docsBranch);
     if (committed.length === 0) { console.log('\nWritulos: no docs committed -- skipping PR.'); return; }
     const prUrl = await openPullRequest(docsBranch, committed);
     console.log(`\nWritulos: done. Opened PR with ${committed.length} doc(s).`);
