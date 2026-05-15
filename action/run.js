@@ -1,10 +1,10 @@
-'use strict';
+﻿'use strict';
 const path = require('path');
 const fs   = require('fs');
 
 const API_URL     = process.env.WRITULOS_API_URL     || 'https://writulos.com/api/action-generate';
 const OUTPUT_DIR  = process.env.WRITULOS_OUTPUT_DIR  || 'docs';
-const API_KEY     = process.env.WRITULOS_API_KEY     || '';
+const API_KEY     = process.env.INPUT_WRITULOS_API_KEY     || '';
 const GH_TOKEN    = process.env.GITHUB_TOKEN         || '';
 const MODE        = (process.env.WRITULOS_MODE       || 'commit').toLowerCase();
 const PR_NUMBER   = process.env.PR_NUMBER;
@@ -369,3 +369,4 @@ main().catch((err) => {
   console.error('Writulos action failed:', err.message);
   process.exit(1);
 });
+
