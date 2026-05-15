@@ -1,29 +1,36 @@
-﻿'use strict';
+'use strict';
 const path = require('path');
 const fs   = require('fs');
 
-const API_URL     = process.env.WRITULOS_API_URL     || 'https://writulos.com/api/action-generate';
-const OUTPUT_DIR  = process.env.WRITULOS_OUTPUT_DIR  || 'docs';
+// All inputs declared in action.yml are mapped by GitHub to INPUT_<UPPERCASE_NAME>
+const API_URL     = process.env.INPUT_API_URL              || 'https://writulos.com/api/action-generate';
+const OUTPUT_DIR  = process.env.INPUT_OUTPUT_DIR           || 'docs';
 const API_KEY     = process.env.INPUT_WRITULOS_API_KEY     || '';
-const GH_TOKEN    = process.env.GITHUB_TOKEN         || '';
-const MODE        = (process.env.WRITULOS_MODE       || 'commit').toLowerCase();
-const PR_NUMBER   = process.env.PR_NUMBER;
-const EVENT_NAME  = process.env.EVENT_NAME;
-const REPO_NAME   = process.env.REPO_NAME            || '';
-const REPO_BRANCH = process.env.REPO_BRANCH          || 'main';
+const GH_TOKEN    = process.env.INPUT_GITHUB_TOKEN         || '';
+const FILE_EXTS   = (process.env.INPUT_FILE_EXTENSIONS     || 'js,ts,jsx,tsx,py,java,go,rb')
+                      .split(',').map(e => e.trim().replace(/^\./, ''));
+const MODE        = (process.env.INPUT_MODE                || 'commit').toLowerCase();
 
-// WRITULOS_WORKSPACE = github.workspace = user's repo root on the runner
-const WORKSPACE      = process.env.WRITULOS_WORKSPACE || process.cwd();
+// Standard GitHub Actions runner env vars (set automatically by GitHub, not via inputs)
+const REPO_NAME   = process.env.GITHUB_REPOSITORY         || '';
+const REPO_BRANCH = (process.env.GITHUB_REF               || '').replace('refs/heads/', '') || 'main';
+const EVENT_NAME  = process.env.GITHUB_EVENT_NAME         || '';
+const PR_NUMBER   = process.env.GITHUB_REF
+                      ? (process.env.GITHUB_REF.match(/refs\/pull\/(\d+)\//) || [])[1]
+                      : null;
+const WORKSPACE   = process.env.GITHUB_WORKSPACE          || process.cwd();
+
 const OUTPUT_DIR_ABS = path.resolve(WORKSPACE, OUTPUT_DIR);
 const LOG_PATH       = path.join(OUTPUT_DIR_ABS, 'writulos.log');
 const LOG_REPO_PATH  = `${OUTPUT_DIR}/writulos.log`;
+const EXTS           = new Set(FILE_EXTS);
 
 if (!API_KEY) {
-  console.error('Writulos: WRITULOS_API_KEY is not set. Add it as a GitHub secret.');
+  console.error('Writulos: writulos_api_key is not set. Add WRITULOS_API_KEY as a GitHub secret.');
   process.exit(1);
 }
 if (!GH_TOKEN) {
-  console.error('Writulos: GITHUB_TOKEN is not set.');
+  console.error('Writulos: github_token is not set. Pass secrets.GITHUB_TOKEN as github_token in your workflow.');
   process.exit(1);
 }
 
@@ -51,11 +58,7 @@ function getAllFiles(dir, root) {
       }
     } else {
       const ext = entry.name.split('.').pop();
-      const exts = new Set(
-        (process.env.WRITULOS_FILE_EXTENSIONS || 'js,ts,jsx,tsx,py,java,go,rb')
-          .split(',').map(e => e.trim().replace(/^\./, ''))
-      );
-      if (ext && exts.has(ext)) results.push(path.relative(root, fullPath));
+      if (ext && EXTS.has(ext)) results.push(path.relative(root, fullPath));
     }
   }
   return results;
@@ -83,7 +86,7 @@ function appendLog({ succeeded, total, remaining, limitReached, isPro, daysLeft,
     if (limitReached) {
       lines.push(isPro
         ? `  NOTIFICATION: Pro limit reached (${monthlyLimit}/month). Resets in ${daysLeft} day(s) - https://writulos.com/#pricing`
-        : `  NOTIFICATION: Free limit reached (10/month). Resets in ${daysLeft} day(s) - https://writulos.com/upgrade`);
+        : `  NOTIFICATION: Free limit reached (${monthlyLimit}/month). Resets in ${daysLeft} day(s) - https://writulos.com/upgrade`);
     }
     lines.push('');
     fs.appendFileSync(LOG_PATH, lines.join('\n'), 'utf8');
@@ -227,7 +230,7 @@ async function openPullRequest(docsBranch, docPaths) {
 async function postPRComment(summaryLines, prUrl) {
   if (!GH_TOKEN || !PR_NUMBER || EVENT_NAME !== 'pull_request') return;
   const fileList = summaryLines.map(l => `- \`${l}\``).join('\n');
-  const prLine   = prUrl ? `\n\n[View the docs PR ->](${prUrl})` : '';
+  const prLine   = prUrl ? `\n\n[View the docs PR ->(${prUrl})` : '';
   const body = [
     '## Writulos -- Documentation Generated', '',
     'Documentation was auto-generated for the following changed files:', '',
@@ -304,7 +307,6 @@ async function main() {
     generated.push({ docPath, content: result.documentation, srcPath: filePath });
   }
 
-  // Write log immediately -- read back right away, guaranteed fresh
   appendLog({
     succeeded:    generated.length,
     total:        changedFiles.length,
@@ -334,7 +336,6 @@ async function main() {
       const ok = await commitFileToBranch(docPath, content, REPO_BRANCH);
       if (ok) committed.push(docPath);
     }
-    // Always commit log -- no empty guard
     await commitFileToBranch(LOG_REPO_PATH, logContent, REPO_BRANCH);
     console.log(`\nWritulos: done. Committed ${committed.length} doc(s) + writulos.log`);
     await postPRComment(committed);
@@ -352,7 +353,6 @@ async function main() {
       const ok = await commitFileToBranch(docPath, content, docsBranch);
       if (ok) committed.push(docPath);
     }
-    // Always commit log -- no empty guard
     await commitFileToBranch(LOG_REPO_PATH, logContent, docsBranch);
     if (committed.length === 0) { console.log('\nWritulos: no docs committed -- skipping PR.'); return; }
     const prUrl = await openPullRequest(docsBranch, committed);
@@ -369,4 +369,3 @@ main().catch((err) => {
   console.error('Writulos action failed:', err.message);
   process.exit(1);
 });
-
